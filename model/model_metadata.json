@@ -1,0 +1,33 @@
+{
+  "target": "0       0\n1       0\n2       0\n3       1\n4       0\n       ..\n4595    0\n4596    0\n4597    0\n4598    1\n4599    0\nName: risk_status, Length: 4600, dtype: int64",
+  "input_columns": [
+    "age",
+    "gender",
+    "region",
+    "employment_type",
+    "annual_income_inr",
+    "credit_score",
+    "credit_utilization_ratio",
+    "missed_payments_12m",
+    "avg_late_payment_days",
+    "monthly_transaction_count",
+    "monthly_spend_inr",
+    "cash_advance_count_6m",
+    "complaints_last_6m",
+    "failed_login_attempts_3m",
+    "account_tenure_months",
+    "debt_balance_inr"
+  ],
+  "threshold": 0.5,
+  "positive_class": 1,
+  "positive_class_label": "High Risk",
+  "dataset_rows": 4600,
+  "test_size": 0.2,
+  "random_state": 42,
+  "best_model_family": "Random Forest",
+  "grid_search_best_params": {
+    "model__max_depth": 5,
+    "model__min_samples_leaf": 2,
+    "model__n_estimators": 180
+  }
+}
