@@ -2,11 +2,9 @@
 
 An early-warning decision-support tool that estimates whether a customer may be **high risk**, built with scikit-learn and served through an interactive **Streamlit** web app.
 
-[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://risk-alert-classifier-project-klkq486smwv8ztbfv23akz.streamlit.app)
+🔗 **Live App:** [https://robust-5fd7qcgpjn6hxvnha76eg4.streamlit.app/](https://risk-alert-classifier-project-klkq486smwv8ztbfv23akz.streamlit.app/)
 
-## 🌐 Live Demo
-
-👉 **Try the app here: [https://YOUR-APP-NAME.streamlit.app](https://YOUR-APP-NAME.streamlit.app)**
+[![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://risk-alert-classifier-project-klkq486smwv8ztbfv23akz.streamlit.app/)
 
 > ⚠️ **Disclaimer:** This tool supports human review. It does **not** establish fraud or default. Always validate alerts and follow your institution's approved decision process before taking action.
 
