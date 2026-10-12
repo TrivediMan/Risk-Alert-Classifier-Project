@@ -14,9 +14,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
 
-# --------------------------------------------------
-# 1. APPLICATION CONFIGURATION
-# --------------------------------------------------
+# =========================================================
+# 1. APP CONFIGURATION
+# =========================================================
 
 st.set_page_config(
     page_title="Risk Alert Classifier",
@@ -25,6 +25,7 @@ st.set_page_config(
 )
 
 st.title("🛡️ Risk Alert Classifier")
+
 st.write(
     "Early-warning decision support for identifying "
     "customers who may be high risk."
@@ -35,12 +36,16 @@ st.warning(
     "or default. Validate alerts before taking action."
 )
 
-# Automatically use the folder containing app.py.
-# No /mnt/data path or hard-coded Windows username is needed.
+# Automatically detect the folder containing app.py.
 BASE_DIR = Path(__file__).resolve().parent
+
 DATA_FILENAME = "Risk_Alert_Classifier_Dataset_4600.csv"
+
 MODEL_DIR = BASE_DIR / "model"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
+
+MODEL_PATH = MODEL_DIR / "Risk_Alert_Fallback_Model.pkl"
+METADATA_PATH = MODEL_DIR / "risk_alert_fallback_metadata.json"
 
 DROP_COLUMNS = [
     "customer_id",
@@ -49,14 +54,14 @@ DROP_COLUMNS = [
 ]
 
 
-# --------------------------------------------------
-# 2. FIND FILES
-# --------------------------------------------------
+# =========================================================
+# 2. FIND DATASET
+# =========================================================
 
-def find_file(filename):
-    """Find a file in the project folder or its subfolders."""
+def find_dataset():
+    """Search the project directory and its subdirectories."""
 
-    direct_path = BASE_DIR / filename
+    direct_path = BASE_DIR / DATA_FILENAME
 
     if direct_path.is_file():
         return direct_path
@@ -69,7 +74,7 @@ def find_file(filename):
         "__pycache__",
     }
 
-    for path in BASE_DIR.rglob(filename):
+    for path in BASE_DIR.rglob(DATA_FILENAME):
         relative_parts = path.relative_to(BASE_DIR).parts
 
         if any(
@@ -84,45 +89,55 @@ def find_file(filename):
     return None
 
 
-# --------------------------------------------------
-# 3. LOAD DATASET
-# --------------------------------------------------
-
-data_path = find_file(DATA_FILENAME)
+data_path = find_dataset()
 
 if data_path is None:
-    st.error("Dataset CSV was not found.")
+    st.error("Dataset CSV not found.")
 
-    st.write("Put your dataset in either location:")
+    st.write("Place your CSV in this folder:")
 
     st.code(
         str(BASE_DIR / "data" / DATA_FILENAME)
-        + "\n"
-        + str(BASE_DIR / DATA_FILENAME)
     )
 
-    st.write("Your application folder:")
-    st.code(str(BASE_DIR))
+    st.write("Or place it directly beside app.py:")
+
+    st.code(
+        str(BASE_DIR / DATA_FILENAME)
+    )
 
     st.stop()
+
+
+# =========================================================
+# 3. LOAD DATA
+# =========================================================
 
 try:
     df = pd.read_csv(data_path)
 
-except Exception as exc:
-    st.error(f"Unable to read the dataset: {exc}")
+except Exception:
+    st.error(
+        "Unable to read the dataset. Check that the CSV "
+        "file is valid and is not open in another program."
+    )
     st.stop()
 
+
 if df.empty:
-    st.error("The dataset is empty.")
+    st.error("The dataset contains no records.")
     st.stop()
+
 
 if "risk_status" not in df.columns:
     st.error(
-        "The CSV must contain a column named 'risk_status'."
+        "The dataset must contain a 'risk_status' column."
     )
+
     st.write("Available columns:", df.columns.tolist())
+
     st.stop()
+
 
 df = df.dropna(subset=["risk_status"]).copy()
 
@@ -133,35 +148,45 @@ if df["risk_status"].nunique() < 2:
     )
     st.stop()
 
-X = df.drop(columns=DROP_COLUMNS, errors="ignore")
+
+X = df.drop(
+    columns=DROP_COLUMNS,
+    errors="ignore",
+)
+
 y = df["risk_status"]
 
 if X.empty:
-    st.error("No usable feature columns were found.")
+    st.error("No usable input features were found.")
     st.stop()
 
 
-# --------------------------------------------------
-# 4. TRAIN A COMPATIBLE FALLBACK MODEL
-# --------------------------------------------------
+# =========================================================
+# 4. TRAIN A NEW COMPATIBLE MODEL
+# =========================================================
 
 def train_model(data):
-    """Train a model without requiring imbalanced-learn."""
+    """
+    Train a fresh model using scikit-learn.
 
-    features = data.drop(
+    This deliberately does not load the old saved model,
+    avoiding the incompatible _RemainderColsList object.
+    """
+
+    X_train = data.drop(
         columns=DROP_COLUMNS,
         errors="ignore",
     )
 
-    target = data["risk_status"]
+    y_train = data["risk_status"]
 
-    numeric_columns = features.select_dtypes(
+    numeric_columns = X_train.select_dtypes(
         include=["number", "bool"]
     ).columns.tolist()
 
     categorical_columns = [
         column
-        for column in features.columns
+        for column in X_train.columns
         if column not in numeric_columns
     ]
 
@@ -222,160 +247,105 @@ def train_model(data):
         n_jobs=-1,
     )
 
-    pipeline = Pipeline(
+    model = Pipeline(
         steps=[
             ("preprocessor", preprocessor),
             ("classifier", classifier),
         ]
     )
 
-    pipeline.fit(features, target)
+    model.fit(X_train, y_train)
 
-    return pipeline, features.columns.tolist()
+    return model, X_train.columns.tolist()
 
 
-# --------------------------------------------------
-# 5. LOAD EXISTING MODEL OR TRAIN A FALLBACK
-# --------------------------------------------------
+# =========================================================
+# 5. TRAIN ONLY ONCE PER SESSION
+# =========================================================
 
-metadata = {}
+if "risk_alert_model" not in st.session_state:
 
-metadata_path = find_file("model_metadata.json")
-
-if metadata_path is not None:
     try:
-        with metadata_path.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
-            metadata = json.load(file)
+        with st.spinner(
+            "Preparing the risk classification model..."
+        ):
+            model, feature_columns = train_model(df)
 
-    except Exception:
-        metadata = {}
+        st.session_state["risk_alert_model"] = model
 
-model = None
-model_message = ""
+        st.session_state["risk_alert_features"] = (
+            feature_columns
+        )
 
-# Reuse the fallback model during Streamlit reruns.
-if "risk_classifier_model" in st.session_state:
-    model = st.session_state["risk_classifier_model"]
-    model_message = st.session_state.get(
-        "risk_classifier_message",
-        "Fallback model trained by this application",
-    )
-
-else:
-    saved_model_path = (
-        find_file("Best_Model.pkl")
-        or find_file("risk_alert_model.joblib")
-    )
-
-    if saved_model_path is not None:
+        # Save the newly trained model separately.
+        # The old Best_Model.pkl is never loaded or overwritten.
         try:
-            if saved_model_path.suffix.lower() == ".joblib":
-                import joblib
+            with MODEL_PATH.open("wb") as file:
+                pickle.dump(model, file)
 
-                model = joblib.load(saved_model_path)
+            metadata = {
+                "input_columns": feature_columns,
+                "threshold": 0.50,
+                "model_family": "Random Forest",
+            }
 
-            else:
-                with saved_model_path.open("rb") as file:
-                    model = pickle.load(file)
-
-            model_message = (
-                f"Existing model: {saved_model_path.name}"
-            )
-
-        except Exception as exc:
-            st.warning(
-                "The existing model could not be loaded. "
-                "A compatible replacement will be trained "
-                "from your dataset. "
-                f"Original error: {exc}"
-            )
-
-    # Automatically train when no saved model is usable.
-    if model is None:
-        try:
-            with st.spinner(
-                "Training a compatible model from your dataset..."
-            ):
-                model, feature_columns = train_model(df)
-
-            st.session_state["risk_classifier_model"] = model
-            st.session_state["risk_classifier_message"] = (
-                "Random Forest fallback model"
-            )
-
-            model_message = "Random Forest fallback model"
-
-            # Save separately; do not overwrite the original model.
-            try:
-                with (
-                    MODEL_DIR / "Fallback_Model.pkl"
-                ).open("wb") as file:
-                    pickle.dump(model, file)
-
-                with (
-                    MODEL_DIR / "fallback_metadata.json"
-                ).open("w", encoding="utf-8") as file:
-                    json.dump(
-                        {
-                            "input_columns": feature_columns,
-                            "threshold": 0.5,
-                            "model_family": "Random Forest",
-                        },
-                        file,
-                        indent=2,
-                    )
-
-            except Exception as save_error:
-                st.info(
-                    "The model works for this session but "
-                    "could not be saved: "
-                    f"{save_error}"
+            with METADATA_PATH.open(
+                "w",
+                encoding="utf-8",
+            ) as file:
+                json.dump(
+                    metadata,
+                    file,
+                    indent=2,
                 )
 
-            st.success("A compatible model is ready.")
+        except OSError:
+            # The model can still be used during this session.
+            pass
 
-        except Exception as exc:
-            st.error(f"Model training failed: {exc}")
-            st.info(
-                "Check that scikit-learn is installed and "
-                "that the dataset contains valid target classes."
-            )
-            st.stop()
+    except Exception:
+        st.error(
+            "The model could not be trained. Check that the "
+            "CSV contains valid feature columns and multiple "
+            "risk_status classes."
+        )
+        st.stop()
 
 
-# --------------------------------------------------
-# 6. PREPARE CUSTOMER INPUTS
-# --------------------------------------------------
+model = st.session_state["risk_alert_model"]
 
-st.caption(f"Model: {model_message}")
-st.caption(f"Dataset: {data_path.name}")
-st.caption(f"Dataset rows: {len(df):,}")
+feature_columns = st.session_state["risk_alert_features"]
 
-feature_columns = metadata.get("input_columns")
 
-if not isinstance(feature_columns, list):
-    feature_columns = X.columns.tolist()
+# =========================================================
+# 6. APPLICATION INFORMATION
+# =========================================================
 
-# Use the dataset schema if old metadata is incompatible.
-if (
-    not feature_columns
-    or any(column not in X.columns for column in feature_columns)
-):
-    feature_columns = X.columns.tolist()
+st.success("Risk classification model is ready.")
 
-st.subheader("Enter customer information")
+st.caption(
+    "Model: Random Forest Classifier"
+)
+
+st.caption(
+    f"Dataset: {data_path.name} | "
+    f"Records: {len(df):,}"
+)
+
+st.subheader("Enter Customer Information")
 
 st.write(
-    "Values are initialized using typical dataset values. "
-    "Change them as required."
+    "The input fields use typical values from the dataset. "
+    "Change the values and click Assess Risk."
 )
 
 
+# =========================================================
+# 7. INPUT FIELD HELPERS
+# =========================================================
+
 def typical_value(series):
-    """Calculate a default input value."""
+    """Find a reasonable default for a feature."""
 
     valid = series.dropna()
 
@@ -396,64 +366,78 @@ def typical_value(series):
 
     modes = valid.astype(str).mode()
 
-    return (
-        str(modes.iloc[0])
-        if not modes.empty
-        else "Unknown"
-    )
+    if not modes.empty:
+        return str(modes.iloc[0])
+
+    return "Unknown"
 
 
-def render_input(column, series, index):
-    """Create a widget appropriate for each feature."""
+def create_input(column, series, index):
+    """Create a Streamlit input based on the feature type."""
 
-    label = str(column).replace("_", " ").title()
+    label = column.replace("_", " ").title()
+
     default = typical_value(series)
-    key = f"customer_feature_{index}"
 
+    key = f"customer_input_{index}"
+
+    # Boolean feature
     if pd.api.types.is_bool_dtype(series):
         return st.selectbox(
             label,
-            [False, True],
+            options=[False, True],
             index=1 if bool(default) else 0,
             key=key,
         )
 
+    # Numeric feature
     if pd.api.types.is_numeric_dtype(series):
-        valid = pd.to_numeric(
+
+        numeric_values = pd.to_numeric(
             series,
             errors="coerce",
         ).dropna()
 
         minimum = (
-            float(valid.min()) if not valid.empty else 0.0
+            float(numeric_values.min())
+            if not numeric_values.empty
+            else 0.0
         )
 
         maximum = (
-            float(valid.max()) if not valid.empty else 100.0
+            float(numeric_values.max())
+            if not numeric_values.empty
+            else 100.0
         )
 
         if minimum == maximum:
             minimum = min(minimum, 0.0)
             maximum = max(maximum, minimum + 1.0)
 
-        default = min(max(float(default), minimum), maximum)
+        default = min(
+            max(float(default), minimum),
+            maximum,
+        )
 
+        # Integer feature
         if pd.api.types.is_integer_dtype(series):
-            low = int(np.floor(minimum))
-            high = int(np.ceil(maximum))
+
+            min_int = int(np.floor(minimum))
+            max_int = int(np.ceil(maximum))
 
             return st.number_input(
                 label,
-                min_value=low,
-                max_value=high,
+                min_value=min_int,
+                max_value=max_int,
                 value=min(
-                    max(int(round(default)), low),
-                    high,
+                    max(int(round(default)), min_int),
+                    max_int,
                 ),
                 step=1,
                 key=key,
             )
 
+        # Decimal feature
         return st.number_input(
             label,
             min_value=float(minimum),
@@ -463,6 +447,7 @@ def render_input(column, series, index):
             key=key,
         )
 
+    # Categorical feature
     options = sorted(
         series.dropna().astype(str).unique().tolist()
     )
@@ -477,30 +462,27 @@ def render_input(column, series, index):
 
     return st.selectbox(
         label,
-        options,
+        options=options,
         index=options.index(default),
         key=key,
     )
 
 
-# --------------------------------------------------
-# 7. ASSESS CUSTOMER RISK
-# --------------------------------------------------
-
-threshold = float(metadata.get("threshold", 0.5))
-
-if not np.isfinite(threshold):
-    threshold = 0.5
-
-threshold = min(max(threshold, 0.10), 0.90)
+# =========================================================
+# 8. CUSTOMER RISK FORM
+# =========================================================
 
 with st.form("customer_risk_form"):
+
     customer_values = {}
+
     columns = st.columns(3)
 
     for index, column in enumerate(feature_columns):
+
         with columns[index % 3]:
-            customer_values[column] = render_input(
+
+            customer_values[column] = create_input(
                 column,
                 X[column],
                 index,
@@ -510,11 +492,11 @@ with st.form("customer_risk_form"):
         "High-risk probability threshold",
         min_value=0.10,
         max_value=0.90,
-        value=threshold,
+        value=0.50,
         step=0.05,
         help=(
             "Lower thresholds may flag more customers "
-            "and increase false positives."
+            "and may increase false positives."
         ),
     )
 
@@ -524,53 +506,38 @@ with st.form("customer_risk_form"):
     )
 
 
-# --------------------------------------------------
-# 8. SHOW PREDICTION
-# --------------------------------------------------
+# =========================================================
+# 9. PREDICT RISK
+# =========================================================
 
 if submitted:
+
     try:
         input_df = pd.DataFrame(
             [customer_values],
             columns=feature_columns,
         )
 
+        # Ensure numerical fields have the expected data types.
         for column in feature_columns:
+
             if pd.api.types.is_numeric_dtype(X[column]):
+
                 input_df[column] = pd.to_numeric(
                     input_df[column],
                     errors="coerce",
                 )
 
-        if not hasattr(model, "predict_proba"):
-            st.error(
-                "The saved model does not support probability "
-                "predictions. Rename the incompatible saved "
-                "model in the model folder and restart the app."
-            )
-            st.stop()
-
         probabilities = model.predict_proba(input_df)
 
-        classes = list(
-            getattr(model, "classes_", [])
-        )
+        classes = list(model.classes_)
 
-        if not classes and hasattr(model, "named_steps"):
-            estimator = model.named_steps.get(
-                "classifier",
-                model.named_steps.get("model"),
-            )
-
-            if estimator is not None:
-                classes = list(
-                    getattr(estimator, "classes_", [])
-                )
-
-        # Identify the high-risk class by its label.
+        # For numeric 0/1 targets, class 1 is treated as high risk.
+        # Also recognize common text labels.
         positive_index = None
 
         for index, value in enumerate(classes):
+
             normalized = (
                 str(value)
                 .strip()
@@ -590,10 +557,10 @@ if submitted:
                 positive_index = index
                 break
 
-        # For binary numeric 0/1 targets, class 1 is positive.
         if positive_index is None:
+
             positive_index = (
-                1 if probabilities.shape[1] > 1 else 0
+                1 if len(classes) > 1 else 0
             )
 
         probability = float(
@@ -605,54 +572,62 @@ if submitted:
             1.0,
         )
 
-        first, second = st.columns(2)
+        # Display results
+        col1, col2 = st.columns(2)
 
-        first.metric(
-            "Estimated high-risk probability",
+        col1.metric(
+            "Estimated High-Risk Probability",
             f"{probability:.1%}",
         )
 
-        second.metric(
-            "Classification threshold",
+        col2.metric(
+            "Classification Threshold",
             f"{threshold:.0%}",
         )
 
         if probability >= threshold:
+
             st.error(
                 "High Risk Alert — review this customer."
             )
+
         else:
+
             st.success(
-                "Low Risk prediction — continue routine monitoring."
+                "Low Risk Prediction — continue routine monitoring."
             )
 
         st.progress(probability)
 
         st.info(
             "This probability is a model estimate, not a guarantee. "
-            "Review the evidence and follow your institution's "
-            "approved decision process."
+            "Review supporting evidence and follow the approved "
+            "decision-making process."
         )
 
-    except Exception as exc:
-        st.error(f"Could not assess this customer: {exc}")
-
-        st.info(
-            "The saved model may use a different feature schema "
-            "or package version. Rename the old saved model and "
-            "restart the app to train a compatible fallback."
+    except Exception:
+        st.error(
+            "Prediction failed. Check the dataset feature types "
+            "and restart the application."
         )
 
 
-# --------------------------------------------------
-# 9. DATASET DETAILS
-# --------------------------------------------------
+# =========================================================
+# 10. DATASET DETAILS
+# =========================================================
 
-with st.expander("Dataset information"):
-    st.write("Rows:", len(df))
-    st.write("Columns:", len(df.columns))
+with st.expander("Dataset Information"):
+
+    st.write("Total records:", len(df))
+
+    st.write("Total columns:", len(df.columns))
+
     st.write(
-        "Target classes:",
+        "Risk classes:",
         [str(value) for value in y.unique()],
     )
-    st.write("Features used:", feature_columns)
+
+    st.write(
+        "Features used:",
+        feature_columns,
+    )
