@@ -6,8 +6,12 @@ An early-warning decision-support tool that estimates whether a customer may be 
 
 [![Streamlit App](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://risk-alert-classifier-project-klkq486smwv8ztbfv23akz.streamlit.app/)
 
-> ⚠️ **Disclaimer:** This tool supports human review. It does **not** establish fraud or default. Always validate alerts and follow your institution's approved decision process before taking action.
+# 🎥 Project Video
 
+
+🔗 **[▶️ Watch Project Video](https://drive.google.com/file/d/14gqNQyHauLz9n4_askKOFZmRCDLg7pL6/view?usp=drive_link)**
+
+---
 ---
 
 ## ✨ Features
